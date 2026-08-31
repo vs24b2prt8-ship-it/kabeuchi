@@ -222,6 +222,8 @@ const PRE_ROLL = 0.35;        // 発話頭の取りこぼし防止(秒)
 const CALIB_MS = 1200;        // マイク開始直後、これだけ環境音を測ってしきい値を決める
 const CALIB_MARGIN = 3.5;     // 環境音のこの倍率を超えたら発話とみなす
 const THR_MIN = 0.004, THR_MAX = 0.08;   // 感度スライダーと同じ範囲
+const CALIB_TOO_LOUD = 0.015; // 測定値がこれを超えたら環境音ではなく声を測っている
+const CALIB_MAX = 0.03;       // 自動調整で上げてよい上限。これ以上は鈍すぎて実用にならない
 
 // ---------- 状態 ----------
 let running = false, ctx = null, stream = null, node = null;
@@ -359,12 +361,18 @@ function onAudio(e){
       const sorted = calibBuf.slice().sort((a, b) => a - b);
       // 平均ではなく上位2割を見る。エアコンや遠くの物音で時々跳ねる分まで環境音に含める
       const floorRms = sorted[Math.floor(sorted.length * 0.8)] || 0;
-      threshold = Math.min(THR_MAX, Math.max(THR_MIN, floorRms * CALIB_MARGIN));
-      localStorage.setItem(LS("thr"), threshold);
-      thrEl.value = threshold; drawThr();
       calibrating = false; calibBuf = [];
       setStatus("待機中", "listen");
-      toast("感度を自動調整: 環境音 " + floorRms.toFixed(3) + " → しきい値 " + threshold.toFixed(3));
+      if (floorRms > CALIB_TOO_LOUD) {
+        // しゃべりながら開始した等。声を環境音として採ると以後まったく拾わなくなる
+        threshold = 0.015;
+        toast("開始時に音が大きかったので自動調整を見送りました。静かな状態で開始し直すと測り直します");
+      } else {
+        threshold = Math.min(CALIB_MAX, Math.max(THR_MIN, floorRms * CALIB_MARGIN));
+        toast("感度を自動調整: 環境音 " + floorRms.toFixed(3) + " → しきい値 " + threshold.toFixed(3));
+      }
+      localStorage.setItem(LS("thr"), threshold);
+      thrEl.value = threshold; drawThr();
     }
     return;
   }
