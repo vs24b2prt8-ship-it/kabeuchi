@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>壁打ちトーク</title>
+<meta name="theme-color" content="#16151a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{
+  --bg:#ffffff; --surface:#faf9f8; --surface2:#f3f2f1; --surface3:#eae9e8;
+  --border:rgb(229,229,229); --text:rgb(62,58,57); --muted:rgb(140,136,135);
+  --accent:rgb(241,157,181);
+  --accent2:rgb(210,100,80);
+  --green:#2E7D32; --gold:#C8820A; --red:#C62828;
+  --mono:'Roboto Condensed','Noto Sans JP',sans-serif;
+  --sans:'Noto Sans JP',sans-serif;
+}
+html[data-theme="dark"]{
+  --bg:#16151a; --surface:#1e1d24; --surface2:#26252e; --surface3:#312f3a;
+  --border:#36343f; --text:#eceaf0; --muted:#9b97a5;
+  --accent:rgb(241,157,181); --accent2:rgb(248,134,114);
+  --green:#6cd99a; --gold:#e8c468; --red:#f37a7a;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-weight:300;
+  height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+.label{font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;font-size:10px;color:var(--muted)}
+
+#app-header{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:14px 20px 10px;border-bottom:1px solid var(--border)}
+#app-header h1{font-weight:300;letter-spacing:.05em;font-size:20px}
+#app-header h1 span{color:var(--accent)}
+.hstats{display:flex;gap:14px;margin-left:auto;align-items:center}
+.hstat b{font-family:var(--mono);font-weight:700;font-size:14px;margin-right:3px}
+.header-actions{display:flex;gap:8px}
+.small-btn{background:transparent;border:1px solid var(--border);color:var(--text);
+  font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;font-size:10px;
+  padding:5px 10px;cursor:pointer;border-radius:3px}
+.small-btn:hover{border-color:var(--accent)}
+
+#chat{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:82%;padding:9px 13px;border-radius:12px;font-size:14px;line-height:1.7;
+  animation:fadeIn .2s;white-space:pre-wrap}
+.msg.user{align-self:flex-end;background:var(--surface3);border:1px solid var(--border);border-bottom-right-radius:3px}
+.msg.ai{align-self:flex-start;background:var(--surface);border:1px solid var(--border);border-bottom-left-radius:3px}
+.msg.ai::before{content:"AI";display:block;font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--accent);margin-bottom:3px}
+.msg.pending{color:var(--muted);font-style:italic}
+.msg.sys{align-self:center;background:transparent;border:none;color:var(--muted);font-size:11px;font-family:var(--mono);letter-spacing:.08em}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+#controls{border-top:1px solid var(--border);background:var(--surface);padding:12px 20px 16px;display:flex;flex-direction:column;gap:10px}
+#ctl-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+#mic-btn{width:64px;height:64px;border-radius:50%;border:2px solid var(--border);background:var(--surface2);
+  cursor:pointer;font-size:26px;flex-shrink:0;transition:all .2s;color:var(--text)}
+#mic-btn.on{border-color:var(--accent);background:rgba(241,157,181,.12);box-shadow:0 0 0 4px rgba(241,157,181,.15)}
+#mic-btn.rec{border-color:var(--red);background:rgba(198,40,40,.12);box-shadow:0 0 0 6px rgba(198,40,40,.18)}
+#status-pill{font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;font-size:11px;
+  padding:3px 9px;border-radius:12px;border:1px solid var(--border);color:var(--muted)}
+#status-pill.listen{color:var(--green);border-color:var(--green)}
+#status-pill.rec{color:var(--red);border-color:var(--red)}
+#status-pill.busy{color:var(--gold);border-color:var(--gold)}
+#status-pill.speak{color:var(--accent);border-color:var(--accent)}
+
+.pill-group{display:flex;gap:6px}
+.pill{border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--muted);
+  font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;font-size:10px;padding:6px 12px;cursor:pointer}
+.pill.active{border-color:var(--accent);background:rgba(241,157,181,.08);color:var(--text)}
+
+#meter-wrap{display:flex;align-items:center;gap:10px;width:100%}
+#meter{flex:1;height:8px;background:var(--surface3);border-radius:4px;position:relative;overflow:hidden}
+#meter-bar{height:100%;width:0%;background:var(--green);border-radius:4px;transition:width .06s linear}
+#meter-thr{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--accent2)}
+#thr{width:110px;accent-color:var(--accent)}
+
+/* 深掘りモード: 話す → 整理する → 決める → 試す */
+.small-btn.on{border-color:var(--accent);color:var(--text);background:rgba(241,157,181,.08)}
+#flow-bar{display:none;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 20px;
+  border-bottom:1px solid var(--border);background:var(--surface)}
+body.deep #flow-bar{display:flex}
+#topic-btn{text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:12px;padding:7px 10px;
+  max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trow{display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--border);
+  border-radius:6px;margin-bottom:6px;cursor:pointer;background:var(--surface)}
+.trow:hover{border-color:var(--accent)}
+.trow.cur{border-color:var(--accent);background:rgba(241,157,181,.08)}
+.trow .tn{font-size:13px;display:block}
+.trow .to{display:block;font-size:11px;color:var(--muted);margin-top:3px;line-height:1.5}
+.badge{font-family:var(--mono);font-size:9px;letter-spacing:.06em;padding:2px 6px;border-radius:3px;
+  border:1px solid var(--border);color:var(--muted);white-space:nowrap}
+.badge.diverged{color:var(--gold);border-color:var(--gold)}
+.badge.fixed{color:var(--green);border-color:var(--green)}
+.badge.tested{color:var(--accent);border-color:var(--accent)}
+.tdel{border:none;background:transparent;color:var(--muted);cursor:pointer;font-size:15px;padding:0 4px;line-height:1}
+#cand-wrap{border:1px solid var(--border);border-radius:6px;padding:10px 12px;background:var(--surface)}
+.phase{border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:4px;
+  font-family:var(--mono);letter-spacing:.05em;font-size:9px;padding:5px 9px;cursor:pointer;text-align:left;line-height:1.5}
+.phase b{display:block;font-weight:400;font-size:11px;letter-spacing:.02em;color:inherit}
+.phase.active{border-color:var(--accent);background:rgba(241,157,181,.08);color:var(--text)}
+#phase-timer{font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:auto;white-space:nowrap}
+#phase-timer.over{color:var(--red)}
+
+#work{flex:1;overflow-y:auto;padding:16px 20px;display:none;flex-direction:column;gap:12px}
+#work.on{display:flex}
+#work-hint{font-size:12px;color:var(--muted);line-height:1.8}
+#work-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+#work-text{flex:1;min-height:300px;background:var(--surface);border:1px solid var(--border);color:var(--text);
+  font-family:var(--sans);font-weight:300;font-size:13px;line-height:1.9;padding:12px;border-radius:6px;resize:vertical}
+#sess-pick{background:var(--surface2);border:1px solid var(--border);color:var(--text);
+  font-family:var(--mono);font-size:10px;padding:5px 8px;border-radius:3px;max-width:220px}
+
+#modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:50;padding:16px}
+#modal-overlay.open{display:flex}
+#modal-box{background:var(--bg);border:1px solid var(--border);border-radius:10px;max-width:640px;width:100%;
+  max-height:80dvh;display:flex;flex-direction:column}
+#modal-head{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border)}
+#modal-body{padding:16px 18px;overflow-y:auto;font-size:13px;line-height:1.8;white-space:pre-wrap}
+#modal-close{margin-left:auto}
+#toast{position:fixed;right:16px;bottom:16px;background:var(--surface);border:1px solid var(--border);
+  border-radius:6px;padding:10px 14px;font-size:12px;display:none;z-index:60;box-shadow:0 2px 10px rgba(0,0,0,.15)}
+
+@media(max-width:700px){
+  #app-header{padding:10px 12px 8px}
+  #chat{padding:12px}
+  #controls{padding:10px 12px 14px}
+  .msg{max-width:92%;font-size:13px}
+  #mic-btn{width:58px;height:58px}
+}
+</style>
+</head>
+<body>
+
+<div id="app-header">
+  <h1>壁打ち<span>トーク</span></h1>
+  <div class="hstats">
+    <div class="hstat"><b id="st-count">0</b><span class="label">発話</span></div>
+    <div class="hstat"><b id="st-time">0:00</b><span class="label">経過</span></div>
+  </div>
+  <div class="header-actions">
+    <button class="small-btn" id="btn-deep">深掘り</button>
+    <button class="small-btn" id="btn-summary">まとめ</button>
+    <button class="small-btn" id="btn-logs">ログ</button>
+    <button class="small-btn" id="btn-new">新規</button>
+    <button class="small-btn" id="btn-theme">◐</button>
+  </div>
+</div>
+
+<div id="flow-bar">
+  <button class="small-btn" id="topic-btn">テーマを選ぶ</button>
+  <div class="pill-group" id="phase-group">
+    <button class="phase active" data-ph="1"><b>① 話す</b>声 20分</button>
+    <button class="phase" data-ph="2"><b>② 整理する</b>文字 40分</button>
+    <button class="phase" data-ph="3"><b>③ 決める</b>文字 30分</button>
+    <button class="phase" data-ph="4"><b>④ 試す</b>声 10分</button>
+  </div>
+  <span id="phase-timer"></span>
+</div>
+
+<div id="chat">
+  <div class="msg sys">マイクボタンを押してセッション開始。しゃべって黙ると自動で送信されます</div>
+</div>
+
+<div id="work">
+  <div id="work-hint"></div>
+  <div id="work-actions">
+    <select id="sess-pick"></select>
+    <button class="small-btn" id="btn-structure">話したログを整理</button>
+    <button class="small-btn" id="btn-load-stock">保存済みを読み込む</button>
+    <button class="small-btn" id="btn-save-stock">決めて保存</button>
+  </div>
+  <div id="cand-wrap" style="display:none"></div>
+  <textarea id="work-text" spellcheck="false"></textarea>
+</div>
+
+<div id="controls">
+  <div id="ctl-row">
+    <button id="mic-btn" title="開始/停止">🎙</button>
+    <span id="status-pill">停止中</span>
+    <div class="pill-group" id="mode-group">
+      <button class="pill active" data-mode="reply">毎回返答</button>
+      <button class="pill" data-mode="listen">聞き専</button>
+    </div>
+    <div class="pill-group">
+      <button class="pill active" id="tts-pill">読み上げON</button>
+    </div>
+    <button class="small-btn" id="btn-grade" style="display:none">採点する</button>
+  </div>
+  <div id="meter-wrap">
+    <span class="label">感度</span>
+    <input type="range" id="thr" min="0.004" max="0.08" step="0.002">
+    <div id="meter"><div id="meter-bar"></div><div id="meter-thr"></div></div>
+  </div>
+</div>
+
+<div id="modal-overlay">
+  <div id="modal-box">
+    <div id="modal-head"><span class="label" id="modal-title">まとめ</span>
+      <button class="small-btn" id="modal-close">閉じる</button></div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script src="local-api.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const LS = k => "kabeuchi_" + k;
+
+// ---------- 設定 ----------
+let mode = localStorage.getItem(LS("mode")) || "reply";   // reply | listen
+let ttsOn = localStorage.getItem(LS("tts")) !== "0";
+let threshold = parseFloat(localStorage.getItem(LS("thr")) || "0.015");
+document.documentElement.dataset.theme = localStorage.getItem(LS("theme")) || "dark";
+
+const TRIGGER = /(どう思う|どうかな|どうすれば|どっちが|意見|アドバイス|質問|答えて|教えて|コメント|聞いてる|返事して)/;
+const SILENCE_MS = 1300;      // これだけ黙ったら発話終了
+const MIN_VOICE_MS = 400;     // これ未満の発話は捨てる(ノイズ)
+const MAX_UTTER_MS = 90000;
+const PRE_ROLL = 0.35;        // 発話頭の取りこぼし防止(秒)
+
+// ---------- 状態 ----------
+let running = false, ctx = null, stream = null, node = null;
+let sessionId = null, startedAt = null, utterCount = 0;
+let history = [];             // {role:"user"|"ai", content}
+let speakingTTS = false;
+
+// 深掘りモード
+let deep = localStorage.getItem(LS("deep")) === "1";
+let phase = 1;                // 1話す 2整理する 3決める 4試す
+let topic = localStorage.getItem(LS("topic")) || "";
+let recallText = "";          // 「試す」で話した内容(AI返答はさせない)
+let topics = [];              // [{name, opener, status, source, parent}]
+let phaseEnd = 0;
+const BUDGET = { 1: 20, 2: 40, 3: 30, 4: 10 };   // 分
+
+// 録音バッファ
+let preBuf = [], preLen = 0, voiceBuf = [], voiced = false, silentMs = 0, voiceMs = 0, srate = 48000;
+
+// ---------- UI ----------
+function setStatus(txt, cls){ const p = $("status-pill"); p.textContent = txt; p.className = cls || ""; }
+function toast(t){ const el = $("toast"); el.textContent = t; el.style.display = "block";
+  clearTimeout(el._t); el._t = setTimeout(()=> el.style.display = "none", 3000); }
+function addMsg(role, text, pending){
+  const d = document.createElement("div");
+  d.className = "msg " + role + (pending ? " pending" : "");
+  d.textContent = text;
+  $("chat").appendChild(d);
+  $("chat").scrollTop = $("chat").scrollHeight;
+  return d;
+}
+function fmtTime(ms){ const s = Math.floor(ms/1000); return Math.floor(s/60) + ":" + String(s%60).padStart(2,"0"); }
+setInterval(()=>{
+  if (startedAt) $("st-time").textContent = fmtTime(Date.now() - startedAt);
+  if (deep && phaseEnd) {
+    const left = phaseEnd - Date.now();
+    $("phase-timer").textContent = (left < 0 ? "超過 +" : "残り ") + fmtTime(Math.abs(left));
+    $("phase-timer").classList.toggle("over", left < 0);
+  }
+}, 1000);
+
+$("btn-theme").onclick = () => {
+  const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = t; localStorage.setItem(LS("theme"), t);
+};
+$("mode-group").querySelectorAll(".pill").forEach(b => b.onclick = () => {
+  mode = b.dataset.mode; localStorage.setItem(LS("mode"), mode);
+  $("mode-group").querySelectorAll(".pill").forEach(x => x.classList.toggle("active", x === b));
+  toast(mode === "reply" ? "毎回返答モード" : "聞き専モード(「どう思う?」等で返答)");
+});
+if (mode === "listen") { $("mode-group").querySelector('[data-mode="listen"]').click(); }
+$("tts-pill").onclick = () => {
+  ttsOn = !ttsOn; localStorage.setItem(LS("tts"), ttsOn ? "1" : "0");
+  $("tts-pill").textContent = ttsOn ? "読み上げON" : "読み上げOFF";
+  $("tts-pill").classList.toggle("active", ttsOn);
+  if (!ttsOn) speechSynthesis.cancel();
+};
+if (!ttsOn) { $("tts-pill").textContent = "読み上げOFF"; $("tts-pill").classList.remove("active"); }
+
+const thrEl = $("thr");
+thrEl.value = threshold;
+function drawThr(){ const r = (threshold - thrEl.min) / (thrEl.max - thrEl.min);
+  $("meter-thr").style.left = (r * 100) + "%"; }
+thrEl.oninput = () => { threshold = parseFloat(thrEl.value); localStorage.setItem(LS("thr"), threshold); drawThr(); };
+drawThr();
+
+// ---------- TTS ----------
+let jaVoice = null;
+function pickVoice(){
+  const vs = speechSynthesis.getVoices().filter(v => v.lang.startsWith("ja"));
+  jaVoice = vs.find(v => /Google/.test(v.name)) || vs.find(v => /Nanami|Ayumi/.test(v.name)) || vs[0] || null;
+}
+speechSynthesis.onvoiceschanged = pickVoice; pickVoice();
+function speak(text){
+  return new Promise(res => {
+    if (!ttsOn || !("speechSynthesis" in window)) return res();
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    if (jaVoice) u.voice = jaVoice;
+    u.lang = "ja-JP"; u.rate = 1.15;
+    speakingTTS = true; setStatus("読み上げ中", "speak");
+    u.onend = u.onerror = () => { setTimeout(()=>{ speakingTTS = false; if (running) setStatus("待機中", "listen"); res(); }, 350); };
+    speechSynthesis.speak(u);
+  });
+}
+
+// ---------- 録音 (ScriptProcessor + 手組みVAD) ----------
+$("mic-btn").onclick = () => running ? stopMic() : startMic();
+
+async function startMic(){
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: {
+      echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch (e) { toast("マイクが使えません: " + e.message); return; }
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+  srate = ctx.sampleRate;
+  const src = ctx.createMediaStreamSource(stream);
+  node = ctx.createScriptProcessor(4096, 1, 1);
+  src.connect(node); node.connect(ctx.destination);
+  node.onaudioprocess = onAudio;
+  running = true;
+  if (!sessionId) newSession(false);
+  if (!startedAt) startedAt = Date.now();
+  $("mic-btn").classList.add("on");
+  setStatus("待機中", "listen");
+  if (navigator.wakeLock) navigator.wakeLock.request("screen").catch(()=>{});
+}
+
+function stopMic(){
+  running = false; voiced = false; voiceBuf = []; preBuf = []; preLen = 0;
+  if (node) { node.disconnect(); node = null; }
+  if (ctx) { ctx.close(); ctx = null; }
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  speechSynthesis.cancel(); speakingTTS = false;
+  $("mic-btn").classList.remove("on", "rec");
+  setStatus("停止中", "");
+}
+
+function onAudio(e){
+  if (!running) return;
+  const ch = e.inputBuffer.getChannelData(0);
+  const buf = new Float32Array(ch);
+  let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+  const rms = Math.sqrt(sum / buf.length);
+  $("meter-bar").style.width = Math.min(100, rms / 0.1 * 100) + "%";
+  $("meter-bar").style.background = rms > threshold ? "var(--red)" : "var(--green)";
+
+  if (speakingTTS) return;   // AIの読み上げ中は拾わない(エコー防止)
+
+  const blockMs = buf.length / srate * 1000;
+  if (!voiced) {
+    preBuf.push(buf); preLen += buf.length;
+    while (preLen > srate * PRE_ROLL) { preLen -= preBuf[0].length; preBuf.shift(); }
+    if (rms > threshold) {
+      voiced = true; silentMs = 0; voiceMs = 0;
+      voiceBuf = preBuf.slice(); preBuf = []; preLen = 0;
+      $("mic-btn").classList.add("rec"); setStatus("録音中", "rec");
+    }
+  } else {
+    voiceBuf.push(buf); voiceMs += blockMs;
+    silentMs = rms > threshold ? 0 : silentMs + blockMs;
+    if (silentMs >= SILENCE_MS || voiceMs >= MAX_UTTER_MS) {
+      const chunks = voiceBuf; voiceBuf = []; voiced = false;
+      $("mic-btn").classList.remove("rec");
+      if (running) setStatus("待機中", "listen");
+      if (voiceMs - silentMs >= MIN_VOICE_MS) handleUtterance(chunks);
+    }
+  }
+}
+
+function encodeWav(chunks){
+  let total = 0; chunks.forEach(c => total += c.length);
+  const all = new Float32Array(total);
+  let off = 0; chunks.forEach(c => { all.set(c, off); off += c.length; });
+  // 16kHzへ間引き
+  const ratio = srate / 16000, outLen = Math.floor(all.length / ratio);
+  const pcm = new Int16Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const v = Math.max(-1, Math.min(1, all[Math.floor(i * ratio)]));
+    pcm[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
+  }
+  const buf = new ArrayBuffer(44 + pcm.length * 2), dv = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, "RIFF"); dv.setUint32(4, 36 + pcm.length * 2, true); w(8, "WAVEfmt ");
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+  dv.setUint32(24, 16000, true); dv.setUint32(28, 32000, true);
+  dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); w(36, "data");
+  dv.setUint32(40, pcm.length * 2, true);
+  new Int16Array(buf, 44).set(pcm);
+  return new Blob([buf], { type: "audio/wav" });
+}
+
+// ---------- 発話処理 ----------
+async function handleUtterance(chunks){
+  const el = addMsg("user", "……文字起こし中……", true);
+  const fd = new FormData();
+  fd.append("audio", encodeWav(chunks), "utter.wav");
+  let text = "";
+  try {
+    const r = await api("api/transcribe", { method: "POST", body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    text = (await r.json()).text;
+  } catch (e) { el.textContent = "(文字起こし失敗)"; toast("STTエラー: " + e.message); return; }
+  text = (text || "").trim();
+  // Whisperの無音幻覚(「ご視聴ありがとうございました」等)を捨てる
+  if (!text || /^(ご視聴|チャンネル登録|お疲れ様|ありがとうございました。?$)/.test(text) && text.length < 20) {
+    el.remove(); return;
+  }
+  el.textContent = text; el.classList.remove("pending");
+  utterCount++; $("st-count").textContent = utterCount;
+  history.push({ role: "user", content: text });
+  postLog("user", text);
+
+  // 「試す」の最中はAIに口を挟ませない。話した内容をためて最後に採点する
+  if (deep && phase === 4) { recallText += text + "\n"; return; }
+
+  const shouldReply = (mode === "reply") || TRIGGER.test(text);
+  if (!shouldReply) return;
+
+  setStatus("思考中", "busy");
+  const ai = addMsg("ai", "……", true);
+  try {
+    const r = await api("api/chat", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, messages: history,
+        phase: (deep && phase === 1) ? "diverge" : "free", topic }) });
+    if (!r.ok) throw new Error(await r.text());
+    const reply = (await r.json()).reply;
+    ai.textContent = reply; ai.classList.remove("pending");
+    history.push({ role: "ai", content: reply });
+    postLog("ai", reply);
+    await speak(reply);
+  } catch (e) {
+    ai.textContent = "(返答失敗)"; toast("chatエラー: " + e.message);
+    if (running) setStatus("待機中", "listen");
+  }
+}
+
+function postLog(role, text){
+  api("api/log", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, role, text }) }).catch(()=>{});
+}
+
+// ---------- セッション ----------
+function newSession(announce){
+  const d = new Date();
+  sessionId = "s" + d.getFullYear() + String(d.getMonth()+1).padStart(2,"0") + String(d.getDate()).padStart(2,"0")
+    + "_" + String(d.getHours()).padStart(2,"0") + String(d.getMinutes()).padStart(2,"0") + String(d.getSeconds()).padStart(2,"0");
+  history = []; utterCount = 0; startedAt = Date.now();
+  $("st-count").textContent = "0";
+  if (announce) { $("chat").innerHTML = ""; addMsg("sys", "新しいセッション: " + sessionId); }
+}
+$("btn-new").onclick = () => newSession(true);
+
+$("btn-summary").onclick = async () => {
+  if (!sessionId || utterCount === 0) { toast("まだ発話がありません"); return; }
+  openModal("まとめ生成中…", "");
+  try {
+    const r = await api("api/summary", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId }) });
+    if (!r.ok) throw new Error(await r.text());
+    const j = await r.json();
+    $("modal-title").textContent = "まとめ(ログに保存済み)";
+    $("modal-body").textContent = j.summary;
+  } catch (e) { $("modal-title").textContent = "まとめ失敗"; $("modal-body").textContent = e.message; }
+};
+
+$("btn-logs").onclick = async () => {
+  openModal("過去ログ", "読込中…");
+  try {
+    const r = await api("api/sessions");
+    const j = await r.json();
+    $("modal-body").innerHTML = "";
+    if (!j.sessions.length) { $("modal-body").textContent = "ログなし"; return; }
+    j.sessions.forEach(s => {
+      const b = document.createElement("button");
+      b.className = "small-btn"; b.style.cssText = "display:block;width:100%;text-align:left;margin-bottom:6px;text-transform:none";
+      b.textContent = s.mtime + "  " + s.name;
+      b.onclick = async () => {
+        const rr = await api("api/sessions/" + s.name);
+        $("modal-title").textContent = s.name;
+        $("modal-body").textContent = (await rr.json()).body;
+      };
+      $("modal-body").appendChild(b);
+    });
+  } catch (e) { $("modal-body").textContent = "取得失敗: " + e.message; }
+};
+// ---------- 深掘りモード ----------
+const HINT = {
+  2: "「話す」で出たログをそのまま整理します。分解が粗いと感じたら、直すより「話す」に戻って要素を足すほうが早い。",
+  3: "生成された文を自分の言葉に直す工程。ここで直さないと口から出てきません。決めるとテーマごとに1枚のメモとしてこの端末に残ります。",
+};
+
+function openModal(title, body){
+  $("modal-title").textContent = title;
+  $("modal-body").style.whiteSpace = "";     // テーマ一覧で normal にした分を戻す
+  $("modal-body").textContent = body || "";
+  $("modal-overlay").classList.add("open");
+}
+
+function setPhase(n){
+  phase = n;
+  document.querySelectorAll(".phase").forEach(b => b.classList.toggle("active", +b.dataset.ph === n));
+  const work = (n === 2 || n === 3);
+  $("work").classList.toggle("on", work);
+  $("chat").style.display = work ? "none" : "";
+  $("controls").style.display = work ? "none" : "";
+  $("btn-grade").style.display = (n === 4) ? "" : "none";
+  $("sess-pick").style.display = (n === 2) ? "" : "none";
+  $("btn-structure").style.display = (n === 2) ? "" : "none";
+  $("btn-load-stock").style.display = (n === 3) ? "" : "none";
+  $("btn-save-stock").style.display = (n === 3) ? "" : "none";
+  $("work-hint").textContent = HINT[n] || "";
+  phaseEnd = Date.now() + BUDGET[n] * 60000;
+  if (n === 1) showOpener();
+  if (n === 2) { $("cand-wrap").style.display = "none"; loadSessionPicker(); }
+  if (n === 4) {
+    recallText = "";
+    addMsg("sys", "試す: 決めた内容を見ずに、90秒で話しきる。話し終えたら採点する");
+  }
+}
+
+function setDeep(v){
+  deep = v;
+  localStorage.setItem(LS("deep"), v ? "1" : "0");
+  document.body.classList.toggle("deep", v);
+  $("btn-deep").classList.toggle("on", v);
+  if (v) { loadTopics().then(() => setPhase(1)); }
+  else {
+    $("work").classList.remove("on");
+    $("chat").style.display = ""; $("controls").style.display = "";
+    $("btn-grade").style.display = "none";
+    $("phase-timer").textContent = ""; phaseEnd = 0;
+  }
+}
+$("btn-deep").onclick = () => setDeep(!deep);
+$("phase-group").querySelectorAll(".phase").forEach(b => b.onclick = () => setPhase(+b.dataset.ph));
+
+
+// ---- テーマ一覧(選択式・話した内容から自己増殖する) ----
+const BADGE = { new: ["未着手", ""], diverged: ["話した", "diverged"],
+                fixed: ["決めた", "fixed"], tested: ["試した", "tested"] };
+
+async function loadTopics(){
+  try { topics = (await (await api("api/topics")).json()).topics || []; }
+  catch (e) { topics = []; }
+  $("topic-btn").textContent = topic || "テーマを選ぶ";
+}
+
+function showOpener(){
+  const t = topics.find(x => x.name === topic);
+  if (t && t.opener) addMsg("sys", "最初に話すこと: " + t.opener);
+}
+
+async function addTopic(obj){
+  await api("api/topics", { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj) });
+}
+
+async function openTopics(){
+  await loadTopics();
+  const mb = $("modal-body");
+  mb.style.whiteSpace = "normal";
+  $("modal-title").textContent = "深掘りテーマ";
+  $("modal-overlay").classList.add("open");
+  mb.innerHTML = "";
+  topics.forEach(t => {
+    const row = document.createElement("div");
+    row.className = "trow" + (t.name === topic ? " cur" : "");
+    const info = document.createElement("div"); info.style.flex = "1";
+    const n = document.createElement("span"); n.className = "tn"; n.textContent = t.name;
+    const o = document.createElement("span"); o.className = "to";
+    o.textContent = (t.parent ? "派生元: " + t.parent + " ／ " : "") + (t.opener || "");
+    info.append(n, o);
+    const b = BADGE[t.status] || BADGE.new;
+    const bd = document.createElement("span"); bd.className = "badge " + b[1]; bd.textContent = b[0];
+    const del = document.createElement("button");
+    del.className = "tdel"; del.textContent = "×"; del.title = "一覧から外す";
+    del.onclick = async ev => {
+      ev.stopPropagation();
+      if (!confirm("「" + t.name + "」を一覧から外しますか。保存済みのストックmdは消えません")) return;
+      await api("api/topics/" + encodeURIComponent(t.name), { method: "DELETE" });
+      openTopics();
+    };
+    row.append(info, bd, del);
+    row.onclick = () => {
+      topic = t.name; localStorage.setItem(LS("topic"), topic);
+      $("topic-btn").textContent = topic;
+      $("modal-overlay").classList.remove("open");
+      if (deep && phase === 1) showOpener();
+    };
+    mb.appendChild(row);
+  });
+  const add = document.createElement("button");
+  add.className = "small-btn";
+  add.style.cssText = "text-transform:none;margin-top:8px;width:100%";
+  add.textContent = "＋ テーマを手で追加";
+  add.onclick = async () => {
+    const n = (prompt("テーマ名") || "").trim();
+    if (!n) return;
+    await addTopic({ name: n, opener: (prompt("最初に話すこと(省略可)") || "").trim(), source: "manual" });
+    topic = n; localStorage.setItem(LS("topic"), topic);
+    openTopics();
+  };
+  mb.appendChild(add);
+}
+$("topic-btn").onclick = openTopics;
+
+// 話したログから別テーマの種を拾って一覧に足す
+async function spawnCandidates(sid){
+  const wrap = $("cand-wrap");
+  wrap.style.display = "block";
+  wrap.innerHTML = "";
+  const lab = document.createElement("span");
+  lab.className = "label"; lab.style.display = "block"; lab.textContent = "派生テーマを探しています…";
+  wrap.appendChild(lab);
+  try {
+    const r = await api("api/spawn", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sid, topic }) });
+    if (!r.ok) throw new Error(await r.text());
+    const cands = (await r.json()).candidates || [];
+    lab.textContent = cands.length ? "この話から出てきた別テーマ（押すと一覧に追加）" : "今回は新しい派生テーマは出ませんでした";
+    cands.forEach(c => {
+      const b = document.createElement("button");
+      b.className = "small-btn";
+      b.style.cssText = "display:block;width:100%;text-align:left;text-transform:none;margin-top:6px;line-height:1.6";
+      b.textContent = "＋ " + c.name + (c.why ? " — " + c.why : "");
+      b.onclick = async () => {
+        await addTopic({ name: c.name, opener: c.opener || "", source: "derived", parent: topic });
+        b.disabled = true; b.textContent = "追加済 ／ " + c.name;
+        loadTopics();
+      };
+      wrap.appendChild(b);
+    });
+  } catch (e) { lab.textContent = "派生テーマの抽出に失敗: " + e.message; }
+}
+
+async function loadSessionPicker(){
+  try {
+    const j = await (await api("api/sessions")).json();
+    const sel = $("sess-pick"); sel.innerHTML = "";
+    j.sessions.forEach(s => {
+      const o = document.createElement("option");
+      o.value = s.name; o.textContent = s.mtime + " / " + s.name;
+      sel.appendChild(o);
+    });
+    if (sessionId && j.sessions.some(s => s.name === sessionId)) sel.value = sessionId;
+  } catch (e) { toast("セッション一覧の取得に失敗"); }
+}
+
+$("btn-structure").onclick = async () => {
+  if (!topic) { toast("先にテーマを入れてください"); return; }
+  const sid = $("sess-pick").value || sessionId;
+  if (!sid) { toast("元になる記録がありません"); return; }
+  $("btn-structure").disabled = true;
+  $("work-text").value = "整理中…";
+  try {
+    const r = await api("api/structure", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sid, topic }) });
+    if (!r.ok) throw new Error(await r.text());
+    $("work-text").value = (await r.json()).md;
+    toast("「決める」へ。自分の言葉に直してから保存");
+    loadTopics();
+    spawnCandidates(sid);           // 同じログから派生テーマも拾う
+  } catch (e) { $("work-text").value = "整理に失敗: " + e.message; }
+  finally { $("btn-structure").disabled = false; }
+};
+
+$("btn-load-stock").onclick = async () => {
+  if (!topic) { toast("先にテーマを入れてください"); return; }
+  try {
+    const r = await api("api/stocks/" + encodeURIComponent(topic));
+    if (!r.ok) throw new Error(await r.text());
+    $("work-text").value = (await r.json()).body;
+  } catch (e) { toast("読み込めません（未保存のテーマ）"); }
+};
+
+$("btn-save-stock").onclick = async () => {
+  if (!topic) { toast("先にテーマを入れてください"); return; }
+  try {
+    const r = await api("api/stocks", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic, body: $("work-text").value }) });
+    if (!r.ok) throw new Error(await r.text());
+    await r.json();
+    toast("決めました。「試す」で見ずに話せるか確かめる");
+    loadTopics();
+  } catch (e) { toast("保存失敗: " + e.message); }
+};
+
+$("btn-grade").onclick = async () => {
+  if (!topic) { toast("先にテーマを入れてください"); return; }
+  if (!recallText.trim()) { toast("まだ何も話していません"); return; }
+  openModal("採点中…", "");
+  try {
+    const r = await api("api/recall", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic, spoken: recallText }) });
+    if (!r.ok) throw new Error(await r.text());
+    openModal("採点結果（ストックに追記済み）", (await r.json()).result);
+    recallText = "";
+  } catch (e) { openModal("採点できません", e.message); }
+};
+
+setDeep(deep);
+
+$("modal-close").onclick = () => $("modal-overlay").classList.remove("open");
+$("modal-overlay").onclick = e => { if (e.target === $("modal-overlay")) $("modal-overlay").classList.remove("open"); };
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js', { scope: './' }).catch(function () {});
+  });
+}
+</script>
+</body>
+</html>
