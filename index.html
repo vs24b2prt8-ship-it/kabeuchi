@@ -219,6 +219,9 @@ const SILENCE_MS = 1300;      // これだけ黙ったら発話終了
 const MIN_VOICE_MS = 400;     // これ未満の発話は捨てる(ノイズ)
 const MAX_UTTER_MS = 90000;
 const PRE_ROLL = 0.35;        // 発話頭の取りこぼし防止(秒)
+const CALIB_MS = 1200;        // マイク開始直後、これだけ環境音を測ってしきい値を決める
+const CALIB_MARGIN = 3.5;     // 環境音のこの倍率を超えたら発話とみなす
+const THR_MIN = 0.004, THR_MAX = 0.08;   // 感度スライダーと同じ範囲
 
 // ---------- 状態 ----------
 let running = false, ctx = null, stream = null, node = null;
@@ -237,6 +240,8 @@ const BUDGET = { 1: 20, 2: 40, 3: 30, 4: 10 };   // 分
 
 // 録音バッファ
 let preBuf = [], preLen = 0, voiceBuf = [], voiced = false, silentMs = 0, voiceMs = 0, srate = 48000;
+let lastClip = null, lastPeak = 0;          // 直近の発話クリップと音量ピーク(切り分け用)
+let calibrating = false, calibBuf = [];     // マイク開始直後の環境音測定
 
 // ---------- UI ----------
 function setStatus(txt, cls){ const p = $("status-pill"); p.textContent = txt; p.className = cls || ""; }
@@ -323,7 +328,9 @@ async function startMic(){
   if (!sessionId) newSession(false);
   if (!startedAt) startedAt = Date.now();
   $("mic-btn").classList.add("on");
-  setStatus("待機中", "listen");
+  // 端末やマイクで環境音の高さが違うので、固定しきい値だと拾いすぎ/拾わなすぎになる
+  calibrating = true; calibBuf = [];
+  setStatus("マイク調整中", "busy");
   if (navigator.wakeLock) navigator.wakeLock.request("screen").catch(()=>{});
 }
 
@@ -346,6 +353,22 @@ function onAudio(e){
   $("meter-bar").style.width = Math.min(100, rms / 0.1 * 100) + "%";
   $("meter-bar").style.background = rms > threshold ? "var(--red)" : "var(--green)";
 
+  if (calibrating) {
+    calibBuf.push(rms);
+    if (calibBuf.length * (buf.length / srate * 1000) >= CALIB_MS) {
+      const sorted = calibBuf.slice().sort((a, b) => a - b);
+      // 平均ではなく上位2割を見る。エアコンや遠くの物音で時々跳ねる分まで環境音に含める
+      const floorRms = sorted[Math.floor(sorted.length * 0.8)] || 0;
+      threshold = Math.min(THR_MAX, Math.max(THR_MIN, floorRms * CALIB_MARGIN));
+      localStorage.setItem(LS("thr"), threshold);
+      thrEl.value = threshold; drawThr();
+      calibrating = false; calibBuf = [];
+      setStatus("待機中", "listen");
+      toast("感度を自動調整: 環境音 " + floorRms.toFixed(3) + " → しきい値 " + threshold.toFixed(3));
+    }
+    return;
+  }
+
   if (speakingTTS) return;   // AIの読み上げ中は拾わない(エコー防止)
 
   const blockMs = buf.length / srate * 1000;
@@ -353,12 +376,13 @@ function onAudio(e){
     preBuf.push(buf); preLen += buf.length;
     while (preLen > srate * PRE_ROLL) { preLen -= preBuf[0].length; preBuf.shift(); }
     if (rms > threshold) {
-      voiced = true; silentMs = 0; voiceMs = 0;
+      voiced = true; silentMs = 0; voiceMs = 0; lastPeak = rms;
       voiceBuf = preBuf.slice(); preBuf = []; preLen = 0;
       $("mic-btn").classList.add("rec"); setStatus("録音中", "rec");
     }
   } else {
     voiceBuf.push(buf); voiceMs += blockMs;
+    if (rms > lastPeak) lastPeak = rms;
     silentMs = rms > threshold ? 0 : silentMs + blockMs;
     if (silentMs >= SILENCE_MS || voiceMs >= MAX_UTTER_MS) {
       const chunks = voiceBuf; voiceBuf = []; voiced = false;
@@ -394,8 +418,12 @@ function encodeWav(chunks){
 // ---------- 発話処理 ----------
 async function handleUtterance(chunks){
   const el = addMsg("user", "……文字起こし中……", true);
+  const wav = encodeWav(chunks);
+  lastClip = wav;                          // 空で返ってきた時に本人が聞いて確かめられるように
+  const secs = (wav.size - 44) / 32000;    // 16kHz 16bit モノラル
+  const peak = lastPeak;
   const fd = new FormData();
-  fd.append("audio", encodeWav(chunks), "utter.wav");
+  fd.append("audio", wav, "utter.wav");
   let text = "";
   try {
     const r = await api("api/transcribe", { method: "POST", body: fd });
@@ -403,9 +431,12 @@ async function handleUtterance(chunks){
     text = (await r.json()).text;
   } catch (e) { el.textContent = "(文字起こし失敗)"; toast("STTエラー: " + e.message); return; }
   text = (text || "").trim();
-  // Whisperの無音幻覚(「ご視聴ありがとうございました」等)を捨てる
-  if (!text || /^(ご視聴|チャンネル登録|お疲れ様|ありがとうございました。?$)/.test(text) && text.length < 20) {
-    el.remove(); return;
+  // Whisperの無音幻覚(「ご視聴ありがとうございました」等)
+  const halluc = /^(ご視聴|チャンネル登録|お疲れ様|ありがとうございました。?$)/.test(text) && text.length < 20;
+  if (!text || halluc) {
+    // 黙って消すと「マイクが効かない」のか「無音を送った」のか本人が切り分けられない
+    showDrop(el, halluc ? "無音時の定型句として除外: " + text : "文字起こしが空で返ってきました", secs, peak);
+    return;
   }
   el.textContent = text; el.classList.remove("pending");
   utterCount++; $("st-count").textContent = utterCount;
@@ -435,6 +466,27 @@ async function handleUtterance(chunks){
     ai.textContent = "(返答失敗)"; toast("chatエラー: " + e.message);
     if (running) setStatus("待機中", "listen");
   }
+}
+
+// 落とした発話を、理由・長さ・音量つきで残す。録音そのものも聞ける
+function showDrop(el, why, secs, peak){
+  el.className = "msg sys";
+  el.textContent = why + " ／ " + secs.toFixed(1) + "秒 ・ 音量ピーク " + peak.toFixed(3)
+    + "（しきい値 " + threshold.toFixed(3) + "）";
+  const b = document.createElement("button");
+  b.className = "small-btn";
+  b.style.cssText = "margin-left:8px;text-transform:none";
+  b.textContent = "▶ この録音を聞く";
+  b.onclick = () => playLastClip();
+  el.appendChild(b);
+  $("chat").scrollTop = $("chat").scrollHeight;
+}
+
+function playLastClip(){
+  if (!lastClip) { toast("再生できる録音がありません"); return; }
+  const a = new Audio(URL.createObjectURL(lastClip));
+  a.onended = a.onerror = () => URL.revokeObjectURL(a.src);
+  a.play().catch(e => toast("再生できません: " + e.message));
 }
 
 function postLog(role, text){
