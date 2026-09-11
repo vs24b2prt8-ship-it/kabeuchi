@@ -230,7 +230,10 @@ async function api(path, opts) {
     try { b = JSON.parse(opts.body); } catch (e) { b = {}; }
   }
   try {
-    return okRes(await route(path, method, b, opts));
+    const res = okRes(await route(path, method, b, opts));
+    // 書き込みがあったら、少し落ち着いてからPCへ送る（会話中は発言ごとにログが増えるので間を置く）
+    if (method === "POST" && path !== "api/chat" && path !== "api/transcribe") scheduleSync();
+    return res;
   } catch (e) {
     return errRes(e.status || 500, e.message || String(e));
   }
@@ -421,6 +424,68 @@ async function route(path, method, b, opts) {
   throw mkErr(404, "unknown endpoint: " + path);
 }
 
+// ---------- PCとの同期（型C：PCが起きていれば自動で突き合わせる） ----------
+// PCが落ちていても、この端末だけで全部動く。PCが起きていれば PC版(server.py の /api/sync)へ
+// ログ・ストック・テーマを送り、PC側にしか無いものを受け取る。PC側に入ったログは土曜のプロフィール更新案に載る。
+// PCのアドレスは公開コードに書かない。設定で端末ごとに入れる。
+
+const K_PC = "kabeuchi_pc_url";
+const K_PC_LAST = "kabeuchi_pc_last";
+let syncTimer = null, syncing = false;
+
+function pcUrl() {
+  let u = "";
+  try { u = (localStorage.getItem(K_PC) || "").trim(); } catch (e) {}
+  if (!u) return "";
+  return u.endsWith("/") ? u : u + "/";
+}
+function setPcState(st) {
+  const b = document.getElementById("btn-settings");
+  if (b) b.textContent = "設定" + ({ ok: "・PC✓", offline: "・PC×", busy: "・PC…" }[st] || "");
+}
+function scheduleSync() {
+  if (!pcUrl()) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(syncWithPC, 20000);
+}
+function mergeByMtime(key, inc) {
+  const cur = loadJSON(key, {});
+  let n = 0;
+  Object.keys(inc || {}).forEach(k => {
+    if (!cur[k] || (cur[k].mtime || "") < (inc[k].mtime || "")) { cur[k] = inc[k]; n++; }
+  });
+  if (n) saveJSON(key, cur);
+  return n;
+}
+async function syncWithPC() {
+  const base = pcUrl();
+  if (!base) { setPcState("off"); return { ok: false, error: "PCのアドレスが未設定" }; }
+  if (syncing) return { ok: false, error: "同期中" };
+  syncing = true;
+  setPcState("busy");
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);   // PCが落ちているとTailscaleの応答待ちが長い
+    const r = await fetch(base + "api/sync", {
+      method: "POST", headers: { "Content-Type": "application/json" }, signal: ctrl.signal,
+      body: JSON.stringify({ sessions: loadJSON(K_SESS, {}), stocks: loadJSON(K_STOCK, {}), topics: loadTopicsRaw() }),
+    });
+    clearTimeout(t);
+    if (!r.ok) throw new Error("PCが応答しません (" + r.status + ")");
+    const d = await r.json();
+    const got = mergeByMtime(K_SESS, d.sessions) + mergeByMtime(K_STOCK, d.stocks);
+    if (Array.isArray(d.topics)) saveTopicsRaw(d.topics);   // PC側で和集合にしたもの
+    try { localStorage.setItem(K_PC_LAST, stamp(true)); } catch (e) {}
+    setPcState("ok");
+    return { ok: true, sent: (d.written.sessions || 0) + (d.written.stocks || 0), got };
+  } catch (e) {
+    setPcState("offline");
+    return { ok: false, error: e.name === "AbortError" ? "PCに届きません（落ちている？）" : (e.message || String(e)) };
+  } finally {
+    syncing = false;
+  }
+}
+
 // ---------- 設定 / データ持ち運び ----------
 
 function exportData() {
@@ -483,9 +548,19 @@ function openSettings() {
     + '</div>'
     + '<input id="set-file" type="file" accept="application/json,.json" style="display:none">'
     + '<div id="set-msg" style="margin-top:10px;color:var(--muted)"></div>'
+    + '<div style="margin:16px 0 6px">PCのアドレス（PC版と同期するとき）</div>'
+    + '<input id="set-pc" type="url" inputmode="url" placeholder="https://…/kabeuchi/" '
+    + 'style="width:100%;padding:9px 10px;font-size:13px;border-radius:6px;'
+    + 'border:1px solid var(--border);background:var(--surface);color:var(--text)">'
+    + '<div style="display:flex;gap:8px;margin-top:8px">'
+    + '<button class="small-btn" id="set-pc-save">保存して同期</button>'
+    + '<button class="small-btn" id="set-pc-sync">今すぐ同期</button>'
+    + '</div>'
+    + '<div id="set-pc-msg" style="margin-top:8px;color:var(--muted)"></div>'
     + '<div style="margin-top:14px;color:var(--muted);font-size:11px;line-height:1.8">'
-    + 'ログ・テーマ・ストックはこの端末の中だけに保存されます。'
-    + '別の端末へ移すときはエクスポートしたファイルをインポートしてください。</div>'
+    + 'ログ・テーマ・ストックはこの端末に保存され、PCが落ちていても使えます。'
+    + 'PCのアドレスを入れておくと、PCが起きているときに自動でPC版と突き合わせます'
+    + '（PCに入ったログは土曜のプロフィール更新案に載ります）。</div>'
     + '</div>';
   ov.classList.add("open");
 
@@ -496,6 +571,26 @@ function openSettings() {
     if (v) localStorage.setItem(K_KEY, v); else localStorage.removeItem(K_KEY);
     msg.textContent = v ? "保存しました" : "キーを消しました";
   };
+  const pcMsg = document.getElementById("set-pc-msg");
+  const showLast = () => {
+    let last = "";
+    try { last = localStorage.getItem(K_PC_LAST) || ""; } catch (e) {}
+    pcMsg.textContent = pcUrl() ? ("最後に同期: " + (last || "まだ")) : "未設定（この端末だけで使う）";
+  };
+  const runSync = async () => {
+    pcMsg.textContent = "同期中…";
+    const r = await syncWithPC();
+    if (r.ok) pcMsg.textContent = "同期しました（PCへ " + r.sent + "件 / PCから " + r.got + "件）";
+    else pcMsg.textContent = "同期できません: " + r.error;
+  };
+  document.getElementById("set-pc").value = pcUrl();
+  showLast();
+  document.getElementById("set-pc-save").onclick = () => {
+    const v = document.getElementById("set-pc").value.trim();
+    try { if (v) localStorage.setItem(K_PC, v); else localStorage.removeItem(K_PC); } catch (e) {}
+    if (v) runSync(); else { setPcState("off"); showLast(); }
+  };
+  document.getElementById("set-pc-sync").onclick = runSync;
   document.getElementById("set-export").onclick = exportData;
   document.getElementById("set-import").onclick = () => document.getElementById("set-file").click();
   document.getElementById("set-file").addEventListener("change", async e => {
@@ -518,4 +613,8 @@ window.addEventListener("load", () => {
     actions.insertBefore(btn, actions.firstChild);
   }
   if (!getKey()) setTimeout(openSettings, 300);   // キー未設定では何も動かないので最初に出す
+  // 開いたとき・画面に戻ってきたとき・開きっぱなしなら数分おきに、PCと突き合わせる
+  syncWithPC();
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") syncWithPC(); });
+  setInterval(() => { if (document.visibilityState === "visible") syncWithPC(); }, 180000);
 });

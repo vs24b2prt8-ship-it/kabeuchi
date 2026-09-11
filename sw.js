@@ -1,5 +1,5 @@
 // 壁打ちトーク service worker — network-first（Groq APIは一切キャッシュしない）
-const CACHE = "kabeuchi-static-v1";
+const CACHE = "kabeuchi-static-v2";
 
 self.addEventListener("install", () => self.skipWaiting());
 
